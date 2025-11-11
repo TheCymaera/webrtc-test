@@ -1,10 +1,11 @@
-import { EmptyDataChannel, LocalBroadcastDataChannel, TransformerDataChannel, type DataChannel } from "../../shared/dataChannels/DataChannel.js";
-import { WebRTCDataChannel } from "../../shared/dataChannels/WebRTCDataChannel.js";
-import type { ChatRoom } from "./ChatRoomPackets.js";
+import { LocalBroadcastDataChannel, TransformerDataChannel, type DataChannel } from "../../shared/dataChannels/DataChannel.js";
 import { RelayClient } from "../../shared/relay/RelayClient.js";
-import { WebRTCNegotiator } from "../WebRTCNegotiator.js";
+import { WebRTCManager } from "../WebRTCNegotiator.js";
+import { ChatRoom } from "./ChatRoomPackets.js";
 
-export type ChatRoomClient = DataChannel<ChatRoom.ClientBoundPacket, ChatRoom.ServerBoundPacket>;
+
+
+export type ChatRoomClient = DataChannel<ChatRoom.InboundPacket, ChatRoom.OutboundPacket>;
 
 export namespace ChatRoomClient {
 	export const createLocal = createLocalChatRoom;
@@ -16,7 +17,7 @@ function createLocalChatRoom(roomId: string) {
 	const myId = crypto.randomUUID() as string;
 
 	const dataChannel = new TransformerDataChannel({
-		original: new LocalBroadcastDataChannel<ChatRoom.ClientBoundPacket>(roomId),
+		original: new LocalBroadcastDataChannel<ChatRoom.InboundPacket>(roomId),
 		disposeOriginal: true,
 		async *inbound(message) {
 			yield* message;
@@ -50,7 +51,7 @@ async function createWebsocketChatRoom(roomId: string) {
 				if (message.type === "message") {
 					const string = 
 						typeof message.content === "string" ? message.content : 
-						"```json\n" + JSON.stringify(message.content, null, 2) + "\n```";
+						jsonMarkdown(message.content);
 					yield { ...message, content: string };
 					continue;
 				}
@@ -67,61 +68,38 @@ async function createWebsocketChatRoom(roomId: string) {
 async function createWebRTChatRoom(roomId: string) {
 	// Set up signal server
 	const { dataChannel: signalServer, myId } = await RelayClient.createAndWaitForId({ roomId });
-	const negotiator = new WebRTCNegotiator(signalServer, myId);
+	const negotiator = new WebRTCManager(signalServer, myId);
 
-	// Set up individual data channels per peer
-	const individualChannels = new Map<string, WebRTCDataChannel<ChatRoom.ServerBoundPacket>>();
-	const mergedChannel = new EmptyDataChannel() satisfies ChatRoomClient;
+	const transformed = new TransformerDataChannel({
+		original: negotiator.createMergedChannel<unknown, ChatRoom.OutboundPacket>(),
+		disposeOriginal: true,
+		async *inbound(messages) {
+			for await (const { peerId, message } of messages) {
+				if (!ChatRoom.OutboundPacket.isInstance(message)) {
+					console.warn("Received invalid ChatRoom.ServerBoundPacket:", message);
+					yield { user: peerId, type: "message", content: jsonMarkdown(message) };
+					continue;
+				}
 
-	mergedChannel[Symbol.dispose] = () => {
-		negotiator[Symbol.dispose]();
-		signalServer[Symbol.dispose]();
-	}
-
-	mergedChannel.send = (message: ChatRoom.ServerBoundPacket) => {
-		// send to all individual channels
-		for (const [_peerId, channel] of individualChannels) {
-			if (message.type !== "message") continue;
-			channel.send(message);
+				yield { ...message, user: peerId } as ChatRoom.InboundPacket;
+			}
+		},
+		async *outbound(messages) {
+			yield *messages;
 		}
-	}
+	}) satisfies ChatRoomClient;
 
-	function initDataChannel(peerId: string, individualChannel: WebRTCDataChannel<ChatRoom.ServerBoundPacket>) {
-		individualChannels.set(peerId, individualChannel);
-
-		// relay messages to merged channel
-		individualChannel.onMessage.addListener((message) => {
-			mergedChannel.onMessage.emit({ ...message, user: peerId });
-		});
-	}
-
-	negotiator.onJoinPeer.addListener(({id, pc}) => {
-		// create data channel
-		const dataChannel = WebRTCDataChannel.fromPeer<ChatRoom.ServerBoundPacket>({ pc, label: "chat" });
-		initDataChannel(id, dataChannel);
+	negotiator.onJoinPeer.addListener(({ id }) => {
+		transformed.onMessage.emit({ type: "join", user: id });
 	});
 
-	negotiator.onCreatePeer.addListener(({id, pc}) => {
-		// be ready to receive data channel
-		pc.ondatachannel = event => {
-			const dataChannel = WebRTCDataChannel.fromEvent<ChatRoom.ServerBoundPacket>({ event });
-			initDataChannel(id, dataChannel);
-		};
+	negotiator.onRemovePeer.addListener(({ id }) => {
+		transformed.onMessage.emit({ type: "leave", user: id });
 	});
 
-	negotiator.onRemovePeer.addListener(({id}) => {
-		const individualChannel = individualChannels.get(id);
-		if (individualChannel) {
-			individualChannel[Symbol.dispose]();
-			individualChannels.delete(id);
-		}
+	return { myId, dataChannel: transformed, negotiator }
+}
 
-		mergedChannel.onMessage.emit({ type: "leave", user: id });
-	});
-
-	return {
-		myId,
-		dataChannel: mergedChannel,
-		negotiator,
-	}
+function jsonMarkdown(packet: unknown): string {
+	return "```json\n" + JSON.stringify(packet, null, 2) + "\n```";
 }

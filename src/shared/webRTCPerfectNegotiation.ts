@@ -67,12 +67,6 @@ export function webRTCPerfectNegotiation(
 	});
 
 	pc.onicecandidate = e => {
-		if (e.candidate) signaler.send({ candidate: e.candidate?.toJSON() });
-	}
-
-	pc.onconnectionstatechange = () => {
-		if (pc.connectionState === "failed") {
-			pc.restartIce();
-		}
+		if (e.candidate) signaler.send({ candidate: e.candidate.toJSON() });
 	}
 }

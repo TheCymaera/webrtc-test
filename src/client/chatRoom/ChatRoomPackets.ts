@@ -1,10 +1,10 @@
 export namespace ChatRoom {
-	export type ServerBoundPacket = {
+	export type OutboundPacket = {
 		type: "message";
 		content: string;
 	}
 
-	export type ClientBoundPacket = {
+	export type InboundPacket = {
 		user: string;
 		type: "join"
 	} | {
@@ -15,4 +15,18 @@ export namespace ChatRoom {
 		type: "message";
 		content: string;
 	}
+
+	export namespace OutboundPacket {
+		export function isInstance(packet: unknown): packet is OutboundPacket {
+			if (typeof packet !== "object" || packet === null) return false;
+
+			const record = packet as Record<string, unknown>;
+			if (record.type === "message" && typeof record.content === "string") {
+				return true;
+			}
+
+			return false;
+		}
+	}
+
 }

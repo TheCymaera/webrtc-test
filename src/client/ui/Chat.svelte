@@ -9,7 +9,7 @@
 	interface Props {
 		className?: string;
 		myId: string;
-		messages: Array<ChatRoom.ClientBoundPacket>;
+		messages: Array<ChatRoom.InboundPacket>;
 		onSendMessage: (text: string) => void;
 	}
 
@@ -92,7 +92,7 @@
 </div>
 
 
-{#snippet messageItem(message: ChatRoom.ClientBoundPacket, firstOfType: boolean, lastOfType: boolean)}
+{#snippet messageItem(message: ChatRoom.InboundPacket, firstOfType: boolean, lastOfType: boolean)}
 	{@const isOffline = offlineUsers.has(message.user)}
 	{@const isMe = message.user === myId}
 	<div class="

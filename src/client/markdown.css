@@ -23,5 +23,16 @@
 			list-style: decimal;
 			margin-left: 1.5rem;
 		}
+
+		& code {
+			background-color: var(--color-codeContainer);
+			padding: 0.2rem 0.4rem;
+			font-family: 'Fira Code', monospace;
+		}
+
+		& a {
+			color: var(--color-primary-500);
+			text-decoration: underline;
+		}
 	}
 }

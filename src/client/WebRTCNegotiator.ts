@@ -1,11 +1,12 @@
 import type { Relay } from "../shared/relay/RelayPackets.js";
-import { TransformerDataChannel, type DataChannel } from "../shared/dataChannels/DataChannel.js";
+import { EmptyDataChannel, TransformerDataChannel, type DataChannel } from "../shared/dataChannels/DataChannel.js";
 import { EventEmitter } from "../shared/EventEmitter.js";
 import { RTCNegotiationMessage, webRTCPerfectNegotiation } from "../shared/webRTCPerfectNegotiation.js";
 import type { RelayClient } from "../shared/relay/RelayClient.js";
+import { WebRTCDataChannel } from "../shared/dataChannels/WebRTCDataChannel.js";
 
 
-export class WebRTCNegotiator {
+export class WebRTCManager {
 	readonly peers = new Map<string, RTCPeerConnection>();
 	readonly onCreatePeer = new EventEmitter<{ id: string, pc: RTCPeerConnection }>();
 	readonly onJoinPeer = new EventEmitter<{ id: string, pc: RTCPeerConnection }>();
@@ -44,8 +45,6 @@ export class WebRTCNegotiator {
 		readonly myId: string,
 		webRTCConfiguration: RTCConfiguration = {}
 	) {
-		const peers = this.peers;
-
 		this.#listener = this.signalServer.onMessage.addListener((signalMessage) => {
 			// ignore own messages
 			if (signalMessage.user === myId) return;
@@ -59,7 +58,7 @@ export class WebRTCNegotiator {
 			const peerId = signalMessage.user;
 			
 			// register a peer
-			if (!peers.has(peerId)) {
+			if (!this.peers.has(peerId)) {
 				// set up signaling channel
 				const signalingChannel = new TransformerDataChannel({
 					original: signalServer,
@@ -83,24 +82,74 @@ export class WebRTCNegotiator {
 					}
 				}) satisfies DataChannel<RTCNegotiationMessage, RTCNegotiationMessage>;
 
+				// create peer connection
 				const pc = new RTCPeerConnection(webRTCConfiguration);
-				peers.set(peerId, pc);
+				this.peers.set(peerId, pc);
 				this.#signalChannels.set(peerId, signalingChannel);
 
+				// connect using perfect negotiation
 				const isPolite = peerId.localeCompare(myId) > 0;
 				webRTCPerfectNegotiation(signalingChannel, pc, isPolite);
 
+				// restart ICE on failure
 				pc.oniceconnectionstatechange = () => {
 					if (pc.iceConnectionState === "failed") pc.restartIce();
 				}
 
+				// emit create event
 				this.onCreatePeer.emit({ id: peerId, pc });
 			}
 
 			if (signalMessage.type === "join") {
-				this.onJoinPeer.emit({ id: peerId, pc: peers.get(peerId)! });
+				// emit join event
+				this.onJoinPeer.emit({ id: peerId, pc: this.peers.get(peerId)! });
 			}
 		});
+	}
+
+	createMergedChannel<Inbound, Outbound>() {
+		// Set up individual data channels per peer
+		type MergedMessage = { peerId: string, message: Inbound };
+		const mergedChannel = new EmptyDataChannel() satisfies DataChannel<MergedMessage, Outbound>;
+		const individualChannels = new Map<string, WebRTCDataChannel<Inbound>>();
+	
+		mergedChannel[Symbol.dispose] = () => {
+			for (const [_peerId, channel] of individualChannels) {
+				channel[Symbol.dispose]();
+			}
+		}
+	
+		mergedChannel.send = (message: Outbound) => {
+			// send to all individual channels
+			for (const [_peerId, channel] of individualChannels) {
+				channel.send(message as unknown as Inbound);
+			}
+		}
+
+		function initDataChannel(peerId: string, individualChannel: WebRTCDataChannel<Inbound>) {
+			individualChannels.set(peerId, individualChannel);
+	
+			// relay messages to merged channel
+			individualChannel.onMessage.addListener((message) => {
+				mergedChannel.onMessage.emit({ peerId, message });
+			});
+		}
+	
+		this.onJoinPeer.addListener(({id, pc}) => {
+			// create data channel
+			const dataChannel = WebRTCDataChannel.fromPeer<Inbound>({ pc, label: "chat" });
+			initDataChannel(id, dataChannel);
+		});
+
+		this.onCreatePeer.addListener(({id, pc}) => {
+			// be ready to receive data channel
+			pc.ondatachannel = event => {
+				const dataChannel = WebRTCDataChannel.fromEvent<Inbound>({ event });
+				initDataChannel(id, dataChannel);
+			};
+		});
+
+		return mergedChannel;
 	}
 }
 
