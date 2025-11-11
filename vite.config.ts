@@ -10,7 +10,7 @@ export default vite.defineConfig({
 			configFile: path.resolve(__dirname, "svelte.config.js"),
 		}),
 	],
-	// serve api/* requests from localhost:8002/api/*
+	// Route API requests
 	server: {
 		host: true,
 		proxy: {

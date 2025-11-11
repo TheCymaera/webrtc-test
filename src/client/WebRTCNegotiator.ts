@@ -66,7 +66,7 @@ export class WebRTCNegotiator {
 					disposeOriginal: false,
 					async *inbound(messages) {
 						// include the current signal message
-						const allMessages = concatAsyncIterables([signalMessage], messages);
+						const allMessages = concatAsync([signalMessage], messages);
 						for await (const message of allMessages) {
 							if (message.user === myId) continue;
 							if (message.user !== peerId) continue;
@@ -104,7 +104,7 @@ export class WebRTCNegotiator {
 	}
 }
 
-async function *concatAsyncIterables<T>(...iterables: (Iterable<T> | AsyncIterable<T>)[]): AsyncIterable<T> {
+async function *concatAsync<T>(...iterables: (Iterable<T> | AsyncIterable<T>)[]): AsyncIterable<T> {
 	for (const iterable of iterables) {
 		yield* iterable;
 	}

@@ -4,9 +4,6 @@ import type { DataChannel } from "./DataChannel.js";
 export interface WebsocketDataChannelOptions<Incoming, Outgoing> {
 	encode: (msg: Outgoing) => string | ArrayBufferLike | Blob | ArrayBufferView,
 	decode: (data: any) => Incoming,
-	onOpen: () => void,
-	onError: (err: Event) => void,
-	onClose: (ev: CloseEvent) => void,
 	filter: (input: Incoming) => boolean,
 }
 
@@ -30,9 +27,6 @@ export class WebsocketDataChannel<Incoming, Outgoing = Incoming> implements Data
 			const incoming = this.#decode(ev.data);
 			this.onMessage.emit(incoming);
 		});
-		if (options?.onOpen) this.#ws.addEventListener("open", options.onOpen);
-		if (options?.onError) this.#ws.addEventListener("error", options.onError);
-		if (options?.onClose) this.#ws.addEventListener("close", options.onClose);
 	}
 
 	send(message: Outgoing): void {
@@ -45,11 +39,5 @@ export class WebsocketDataChannel<Incoming, Outgoing = Incoming> implements Data
 	}
 
 	static defaultEncoder = <T>(msg: T): string => JSON.stringify(msg);
-	static defaultDecoder = <T>(data: any): T => {
-		try {
-			return JSON.parse(typeof data === "string" ? data : data?.toString?.() ?? "");
-		} catch {
-			return data as T;
-		}
-	}
+	static defaultDecoder = <T>(data: any): T => JSON.parse(`${data}`);
 }
