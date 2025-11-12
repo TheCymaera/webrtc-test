@@ -15,7 +15,6 @@ export async function iceEndpoint(_server: Bun.Server<unknown>, _request: Reques
 	return new Response(JSON.stringify({ iceServers }), {
 		headers: {
 			"content-type": "application/json",
-			"access-control-allow-origin": "*"
 		},
 	});
 }
