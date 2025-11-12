@@ -1,6 +1,6 @@
 import { LocalBroadcastDataChannel, TransformerDataChannel, type DataChannel } from "../../shared/dataChannels/DataChannel.js";
 import { RelayClient } from "../../shared/relay/RelayClient.js";
-import { WebRTCManager } from "../WebRTCNegotiator.js";
+import { WebRTCManager } from "../WebRTCManager.js";
 import { ChatRoom } from "./ChatRoomPackets.js";
 
 
@@ -49,10 +49,11 @@ async function createWebsocketChatRoom(roomId: string) {
 				}
 
 				if (message.type === "message") {
-					const string = 
+					const messageAsString = 
 						typeof message.content === "string" ? message.content : 
 						jsonMarkdown(message.content);
-					yield { ...message, content: string };
+					
+					yield { ...message, content: messageAsString };
 					continue;
 				}
 			}
@@ -71,12 +72,12 @@ async function createWebRTChatRoom(roomId: string) {
 	const negotiator = new WebRTCManager(signalServer, myId);
 
 	const transformed = new TransformerDataChannel({
-		original: negotiator.createMergedChannel<unknown, ChatRoom.OutboundPacket>(),
+		original: negotiator.createMergedChannel<ChatRoom.OutboundPacket>(),
 		disposeOriginal: true,
 		async *inbound(messages) {
 			for await (const { peerId, message } of messages) {
 				if (!ChatRoom.OutboundPacket.isInstance(message)) {
-					console.warn("Received invalid ChatRoom.ServerBoundPacket:", message);
+					console.warn("Received invalid ChatRoom packet:", message);
 					yield { user: peerId, type: "message", content: jsonMarkdown(message) };
 					continue;
 				}

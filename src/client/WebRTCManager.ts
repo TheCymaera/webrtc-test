@@ -107,7 +107,9 @@ export class WebRTCManager {
 		});
 	}
 
-	createMergedChannel<Inbound, Outbound>() {
+	createMergedChannel<Outbound>() {
+		type Inbound = unknown;
+
 		// Set up individual data channels per peer
 		type MergedMessage = { peerId: string, message: Inbound };
 		const mergedChannel = new EmptyDataChannel() satisfies DataChannel<MergedMessage, Outbound>;
@@ -122,7 +124,7 @@ export class WebRTCManager {
 		mergedChannel.send = (message: Outbound) => {
 			// send to all individual channels
 			for (const [_peerId, channel] of individualChannels) {
-				channel.send(message as unknown as Inbound);
+				channel.send(message);
 			}
 		}
 

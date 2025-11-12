@@ -2,15 +2,15 @@ import type { DataChannel } from "./DataChannel.js";
 import { EventEmitter } from "../EventEmitter.js";
 
 
-export class WebRTCDataChannel<T> implements DataChannel<T, T> {
-	readonly onMessage = new EventEmitter<T>();
+export class WebRTCDataChannel<T> implements DataChannel<unknown, T> {
+	readonly onMessage = new EventEmitter<unknown>();
 
 	constructor(readonly options: {
 		readonly dataChannel: RTCDataChannel,
 		readonly disposeDataChannel: boolean,
 	}) {
 		this.options.dataChannel.onmessage = (event) => {
-			this.onMessage.emit(JSON.parse(event.data) as T);
+			this.onMessage.emit(JSON.parse(event.data));
 		}
 	}
  
