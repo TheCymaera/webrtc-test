@@ -67,12 +67,30 @@ async function createWebsocketChatRoom(roomId: string) {
 }
 
 async function createWebRTChatRoom(roomId: string) {
+	// Get ice servers
+	const iceServers = await fetch("/api/ice").then(res => res.json()).then(data => data.iceServers as RTCIceServer[]);
+	console.log("Received ICE servers:", iceServers);
+
 	// Set up signal server
 	const { dataChannel: signalServer, myId } = await RelayClient.createAndWaitForId({ roomId });
-	const negotiator = new WebRTCManager(signalServer, myId);
+	
+	const manager = new WebRTCManager(signalServer, myId, { iceServers });
+
+	manager.onConnectionStateChange.addListener(({ id, pc }) => {
+		const logMessage = `Connection state for peer ${id} changed to ${pc.connectionState}:`;
+		const connectionType = pc.sctp?.transport.iceTransport.getSelectedCandidatePair();
+		if (!connectionType) {
+			console.log(logMessage);
+		} else {
+			console.groupCollapsed(logMessage);
+			console.log(`  Local:`, connectionType.local);
+			console.log(`  Remote:`, connectionType.remote);
+			console.groupEnd();
+		}
+	});
 
 	const transformed = new TransformerDataChannel({
-		original: negotiator.createMergedChannel<ChatRoom.OutboundPacket>(),
+		original: manager.createMergedChannel<ChatRoom.OutboundPacket>(),
 		disposeOriginal: true,
 		async *inbound(messages) {
 			for await (const { peerId, message } of messages) {
@@ -90,15 +108,15 @@ async function createWebRTChatRoom(roomId: string) {
 		}
 	}) satisfies ChatRoomClient;
 
-	negotiator.onJoinPeer.addListener(({ id }) => {
+	manager.onJoinPeer.addListener(({ id }) => {
 		transformed.onMessage.emit({ type: "join", user: id });
 	});
 
-	negotiator.onRemovePeer.addListener(({ id }) => {
+	manager.onRemovePeer.addListener(({ id }) => {
 		transformed.onMessage.emit({ type: "leave", user: id });
 	});
 
-	return { myId, dataChannel: transformed, negotiator }
+	return { myId, dataChannel: transformed, negotiator: manager }
 }
 
 function jsonMarkdown(packet: unknown): string {

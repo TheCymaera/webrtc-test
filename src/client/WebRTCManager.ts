@@ -11,6 +11,7 @@ export class WebRTCManager {
 	readonly onCreatePeer = new EventEmitter<{ id: string, pc: RTCPeerConnection }>();
 	readonly onJoinPeer = new EventEmitter<{ id: string, pc: RTCPeerConnection }>();
 	readonly onRemovePeer = new EventEmitter<{ id: string }>();
+	readonly onConnectionStateChange = new EventEmitter<{ id: string, pc: RTCPeerConnection }>();
 	readonly #signalChannels = new Map<string, DataChannel<RTCNegotiationMessage, RTCNegotiationMessage>>();
 
 	#listener: Disposable;
@@ -94,6 +95,7 @@ export class WebRTCManager {
 				// restart ICE on failure
 				pc.oniceconnectionstatechange = () => {
 					if (pc.iceConnectionState === "failed") pc.restartIce();
+					this.onConnectionStateChange.emit({ id: peerId, pc });
 				}
 
 				// emit create event
@@ -149,6 +151,14 @@ export class WebRTCManager {
 				const dataChannel = WebRTCDataChannel.fromEvent<Inbound>({ event });
 				initDataChannel(id, dataChannel);
 			};
+		});
+
+		this.onRemovePeer.addListener(({id}) => {
+			// dispose individual channel
+			const individualChannel = individualChannels.get(id);
+			if (!individualChannel) return;
+			individualChannel[Symbol.dispose]();
+			individualChannels.delete(id);
 		});
 
 		return mergedChannel;

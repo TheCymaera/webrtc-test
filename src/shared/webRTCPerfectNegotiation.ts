@@ -23,7 +23,7 @@ export function webRTCPerfectNegotiation(
 	polite: boolean
 ) {
 	let makingOffer = false;
-	let ignoreOffer = false;	
+	let ignoreOffer = false;
 
 	pc.onnegotiationneeded = async () => {
 		makingOffer = true;

@@ -1,0 +1,42 @@
+# Docker Compose configuration for coturn STUN/TURN server
+# https://github.com/coturn/coturn
+services:
+  coturn:
+    image: coturn/coturn:latest
+    container_name: coturn
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -euo pipefail
+        echo "Starting coturn for realm: ${COTURN_REALM} on ${COTURN_PUBLIC_IP}"
+        turnserver \
+          --no-cli \
+          --no-tls \
+          --no-dtls \
+          --fingerprint \
+          --syslog \
+          --listening-ip=0.0.0.0 \
+          ${COTURN_EXTERNAL_IP:+--external-ip=${COTURN_EXTERNAL_IP}} \
+          --realm=${COTURN_REALM} \
+          --listening-port=${COTURN_PORT} \
+          --min-port=${COTURN_RELAY_PORT_MIN} \
+          --max-port=${COTURN_RELAY_PORT_MAX} \
+          --use-auth-secret \
+          --static-auth-secret=${COTURN_SECRET} \
+          --user-quota=0 \
+          --total-quota=0 \
+          --stale-nonce
+    ports:
+      # STUN/TURN
+      - "${COTURN_PORT}:${COTURN_PORT}/tcp"
+      - "${COTURN_PORT}:${COTURN_PORT}/udp"
+
+      # TURN relay port range (adjust as needed; larger range = more concurrent relays)
+      - "${COTURN_RELAY_PORT_MIN}-${COTURN_RELAY_PORT_MAX}:${COTURN_RELAY_PORT_MIN}-${COTURN_RELAY_PORT_MAX}/udp"
+      - "${COTURN_RELAY_PORT_MIN}-${COTURN_RELAY_PORT_MAX}:${COTURN_RELAY_PORT_MIN}-${COTURN_RELAY_PORT_MAX}/tcp"
+    # If you later add TLS certs, mount them and remove --no-tls/--no-dtls above,
+    # then expose 5349 and add --cert/--pkey flags.
+    # volumes:
+    #   - ./infra/turn/certs:/certs:ro
