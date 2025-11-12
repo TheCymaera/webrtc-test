@@ -1,9 +1,8 @@
 import type { Relay } from "../shared/relay/RelayPackets.js";
-import { EmptyDataChannel, TransformerDataChannel, type DataChannel } from "../shared/dataChannels/DataChannel.js";
+import { TransformerDataChannel, type DataChannel } from "../shared/dataChannels/DataChannel.js";
 import { EventEmitter } from "../shared/EventEmitter.js";
 import { RTCNegotiationMessage, webRTCPerfectNegotiation } from "../shared/webRTCPerfectNegotiation.js";
 import type { RelayClient } from "../shared/relay/RelayClient.js";
-import { WebRTCDataChannel } from "../shared/dataChannels/WebRTCDataChannel.js";
 
 
 export class WebRTCManager {
@@ -107,61 +106,6 @@ export class WebRTCManager {
 				this.onJoinPeer.emit({ id: peerId, pc: this.peers.get(peerId)! });
 			}
 		});
-	}
-
-	createMergedChannel<Outbound>() {
-		type Inbound = unknown;
-
-		// Set up individual data channels per peer
-		type MergedMessage = { peerId: string, message: Inbound };
-		const mergedChannel = new EmptyDataChannel() satisfies DataChannel<MergedMessage, Outbound>;
-		const individualChannels = new Map<string, WebRTCDataChannel<Inbound>>();
-	
-		mergedChannel[Symbol.dispose] = () => {
-			for (const [_peerId, channel] of individualChannels) {
-				channel[Symbol.dispose]();
-			}
-		}
-	
-		mergedChannel.send = (message: Outbound) => {
-			// send to all individual channels
-			for (const [_peerId, channel] of individualChannels) {
-				channel.send(message);
-			}
-		}
-
-		function initDataChannel(peerId: string, individualChannel: WebRTCDataChannel<Inbound>) {
-			individualChannels.set(peerId, individualChannel);
-	
-			// relay messages to merged channel
-			individualChannel.onMessage.addListener((message) => {
-				mergedChannel.onMessage.emit({ peerId, message });
-			});
-		}
-	
-		this.onJoinPeer.addListener(({id, pc}) => {
-			// create data channel
-			const dataChannel = WebRTCDataChannel.fromPeer<Inbound>({ pc, label: "chat" });
-			initDataChannel(id, dataChannel);
-		});
-
-		this.onCreatePeer.addListener(({id, pc}) => {
-			// be ready to receive data channel
-			pc.ondatachannel = event => {
-				const dataChannel = WebRTCDataChannel.fromEvent<Inbound>({ event });
-				initDataChannel(id, dataChannel);
-			};
-		});
-
-		this.onRemovePeer.addListener(({id}) => {
-			// dispose individual channel
-			const individualChannel = individualChannels.get(id);
-			if (!individualChannel) return;
-			individualChannel[Symbol.dispose]();
-			individualChannels.delete(id);
-		});
-
-		return mergedChannel;
 	}
 }
 

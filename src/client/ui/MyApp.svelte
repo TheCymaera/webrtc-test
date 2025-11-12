@@ -129,11 +129,11 @@
 		{/if}
 	</div>
 
-	{#if chatClient && "negotiator" in chatClient}
+	{#if chatClient && "webRTCManager" in chatClient}
 		<div class="bg-surfaceContainer w-100 p-4 overflow-y-auto">
 			<h3 class="text-xl font-bold mb-3">Peers</h3>
 
-			{#each updatePeriodically(chatClient.negotiator.peers) as [peerId, peer]}
+			{#each updatePeriodically(chatClient.webRTCManager.peers) as [peerId, peer]}
 				<div class="relative p-3">
 					<div class="absolute top-3 left-3 w-10 h-10">
 						<Avatar userId={peerId} />

@@ -1,4 +1,5 @@
-import { LocalBroadcastDataChannel, TransformerDataChannel, type DataChannel } from "../../shared/dataChannels/DataChannel.js";
+import { LocalBroadcastDataChannel, MergedChannel, TransformerDataChannel, type DataChannel } from "../../shared/dataChannels/DataChannel.js";
+import { WebRTCDataChannel } from "../../shared/dataChannels/WebRTCDataChannel.js";
 import { RelayClient } from "../../shared/relay/RelayClient.js";
 import { WebRTCManager } from "../WebRTCManager.js";
 import { ChatRoom } from "./ChatRoomPackets.js";
@@ -16,8 +17,11 @@ export namespace ChatRoomClient {
 function createLocalChatRoom(roomId: string) {
 	const myId = crypto.randomUUID() as string;
 
+	const broadcastChannel = new LocalBroadcastDataChannel<ChatRoom.InboundPacket>(roomId);
+	broadcastChannel.send({ type: "join", user: myId });
+
 	const dataChannel = new TransformerDataChannel({
-		original: new LocalBroadcastDataChannel<ChatRoom.InboundPacket>(roomId),
+		original: broadcastChannel,
 		disposeOriginal: true,
 		async *inbound(message) {
 			yield* message;
@@ -28,8 +32,6 @@ function createLocalChatRoom(roomId: string) {
 			}
 		}
 	}) satisfies ChatRoomClient;
-
-	dataChannel.options.original.send({ type: "join", user: myId });
 
 	return { myId, dataChannel };
 }
@@ -89,18 +91,39 @@ async function createWebRTChatRoom(roomId: string) {
 		}
 	});
 
-	const transformed = new TransformerDataChannel({
-		original: manager.createMergedChannel<ChatRoom.OutboundPacket>(),
+	const mergedChannel = new MergedChannel<unknown, ChatRoom.OutboundPacket>({
+		disposeChildren: true
+	});
+
+	manager.onCreatePeer.addListener(({id, pc}) => {
+		pc.ondatachannel = event => {
+			const dataChannel = WebRTCDataChannel.fromEvent<ChatRoom.OutboundPacket>({ event });
+			mergedChannel.addChild(id, dataChannel);
+		};
+	});
+
+	manager.onJoinPeer.addListener(({id, pc}) => {
+		const dataChannel = WebRTCDataChannel.fromPeer<ChatRoom.OutboundPacket>({ pc, label: "data" });
+		mergedChannel.addChild(id, dataChannel);
+	});
+
+	manager.onRemovePeer.addListener(({ id }) => {
+		mergedChannel.removeChild(id);
+	});
+
+	const transformer = new TransformerDataChannel({
+		original: mergedChannel,
 		disposeOriginal: true,
+		extraDisposables: [signalServer, manager],
 		async *inbound(messages) {
-			for await (const { peerId, message } of messages) {
+			for await (const { id, message } of messages) {
 				if (!ChatRoom.OutboundPacket.isInstance(message)) {
 					console.warn("Received invalid ChatRoom packet:", message);
-					yield { user: peerId, type: "message", content: jsonMarkdown(message) };
+					yield { user: id, type: "message", content: jsonMarkdown(message) };
 					continue;
 				}
 
-				yield { ...message, user: peerId } as ChatRoom.InboundPacket;
+				yield { ...message, user: id } as ChatRoom.InboundPacket;
 			}
 		},
 		async *outbound(messages) {
@@ -109,14 +132,18 @@ async function createWebRTChatRoom(roomId: string) {
 	}) satisfies ChatRoomClient;
 
 	manager.onJoinPeer.addListener(({ id }) => {
-		transformed.onMessage.emit({ type: "join", user: id });
+		transformer.onMessage.emit({ type: "join", user: id });
 	});
 
 	manager.onRemovePeer.addListener(({ id }) => {
-		transformed.onMessage.emit({ type: "leave", user: id });
+		transformer.onMessage.emit({ type: "leave", user: id });
 	});
 
-	return { myId, dataChannel: transformed, negotiator: manager }
+	return {
+		myId,
+		webRTCManager: manager,
+		dataChannel: transformer,
+	}
 }
 
 function jsonMarkdown(packet: unknown): string {

@@ -5,20 +5,6 @@ export interface DataChannel<Inbound, Outbound> extends Disposable {
 	send(message: Outbound): void;
 }
 
-export class EmptyDataChannel<Inbound, Outbound> implements DataChannel<Inbound, Outbound> {
-	constructor(
-		readonly onMessage = new EventEmitter<Inbound>()
-	) {}
-
-	send = (_message: Outbound) => {
-		// do nothing
-	}
-	
-	[Symbol.dispose] = () => {
-		// do nothing
-	}
-}
-
 export class LocalBroadcastDataChannel<T> {
 	readonly onMessage = new EventEmitter<T>();
 	readonly broadcastChannel: BroadcastChannel;
@@ -42,9 +28,10 @@ export class TransformerDataChannel<Inbound, Outbound, OriginalInbound, Original
 	readonly #inboundStream;
 	readonly #outboundStream = new AsyncIterableStream<Outbound, void>();
 
-	constructor(readonly options: {
+	constructor(private readonly options: {
 		readonly original: DataChannel<OriginalInbound, OriginalOutbound>,
 		readonly disposeOriginal: boolean,
+		readonly extraDisposables?: Disposable[],
 		readonly inbound: (input: AsyncIterable<OriginalInbound>) => AsyncIterable<Inbound>,
 		readonly outbound: (output: AsyncIterable<Outbound>) => AsyncIterable<OriginalOutbound>,
 	}) {
@@ -75,5 +62,68 @@ export class TransformerDataChannel<Inbound, Outbound, OriginalInbound, Original
 		if (this.options.disposeOriginal) {
 			this.options.original[Symbol.dispose]();
 		}
+		for (const disposable of this.options.extraDisposables ?? []) {
+			disposable[Symbol.dispose]();
+		}
+	}
+}
+
+export type MergedChanelMessage<T> = {
+	id: string;
+	message: T;
+};
+
+export class MergedChannel<Inbound, Outbound> implements DataChannel<MergedChanelMessage<Inbound>, Outbound> {
+	readonly onMessage = new EventEmitter<MergedChanelMessage<Inbound>>();
+	readonly #individualChannels = new Map<string, DataChannel<Inbound, Outbound>>();
+	readonly #disposables = new Map<string, Disposable[]>();
+	readonly #extraDisposables: Disposable[] = [];
+
+	constructor(readonly options: {
+		readonly disposeChildren: boolean;
+	}) {}
+
+	addDisposable(disposable: Disposable) {
+		this.#extraDisposables.push(disposable);
+	}
+
+	addChild(id: string, channel: DataChannel<Inbound, Outbound>) {
+		this.#individualChannels.set(id, channel);
+
+		const disposables: Disposable[] = [];
+		this.#disposables.set(id, disposables);
+
+		const listener = channel.onMessage.addListener((message) => {
+			this.onMessage.emit({ id, message });
+		});
+
+		disposables.push(listener);
+
+		if (this.options.disposeChildren) {
+			disposables.push(channel);
+		}
+	}
+
+	removeChild(id: string) {
+		this.#individualChannels.delete(id);
+		const disposables = this.#disposables.get(id);
+		if (!disposables) return;
+		for (const disposable of disposables) {
+			disposable[Symbol.dispose]();
+		}
+		this.#disposables.delete(id);
+	}
+
+	send(message: Outbound) {
+		for (const [_peerId, channel] of this.#individualChannels) {
+			channel.send(message);
+		}
+	}
+
+	[Symbol.dispose]() {
+		for (const [_peerId, channel] of this.#individualChannels) {
+			channel[Symbol.dispose]();
+		}
+		this.#individualChannels.clear();
 	}
 }
