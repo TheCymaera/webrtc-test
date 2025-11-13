@@ -44,25 +44,7 @@ export class WebRTCManager {
 		readonly myId: string,
 		webRTCConfiguration: RTCConfiguration = {}
 	) {
-		this.#listener = this.signalServer.onMessage.addListener((signalMessage) => {
-			const peerId = signalMessage.user;
-
-			// ignore own messages
-			if (peerId === myId) return;
-
-			// process leave messages
-			if (signalMessage.type === "leave") {
-				this.removePeer(peerId);
-				return;
-			}
-
-
-			// negotiations happen lazily, ping the other peer so they know about us immediately
-			if (signalMessage.type === "join") {
-				signalServer.send({ type: "message", content: "ping", recipients: [peerId] });
-			}
-
-			
+		const createPeerConnection = (peerId: string) => {
 			// peer already exists
 			if (this.peers.has(peerId)) return;
 
@@ -72,8 +54,7 @@ export class WebRTCManager {
 				disposeOriginal: false,
 				async *inbound(messages) {
 					// include the current signal message
-					const allMessages = concatAsync([signalMessage], messages);
-					for await (const message of allMessages) {
+					for await (const message of messages) {
 						if (message.user === myId) continue;
 						if (message.user !== peerId) continue;
 						if (message.type !== "message") continue;
@@ -105,12 +86,31 @@ export class WebRTCManager {
 
 			// emit create event
 			this.onCreatePeer.emit({ id: peerId, pc });
-		});
-	}
-}
+		}
 
-async function *concatAsync<T>(...iterables: (Iterable<T> | AsyncIterable<T>)[]): AsyncIterable<T> {
-	for (const iterable of iterables) {
-		yield* iterable;
+		this.#listener = this.signalServer.onMessage.addListener((signalMessage) => {
+			const peerId = signalMessage.user;
+
+			// ignore own messages
+			if (peerId === myId) return;
+
+			// process leave messages
+			if (signalMessage.type === "leave") {
+				this.removePeer(peerId);
+				return;
+			}
+
+			// create peers
+			if (signalMessage.type === "join") {
+				signalServer.send({ type: "message", content: "request_connection", recipients: [peerId] });
+				createPeerConnection(peerId);
+				return;
+			}
+
+			if (signalMessage.type === "message" && signalMessage.content === "request_connection") {
+				createPeerConnection(peerId);
+				return;
+			}
+		});
 	}
 }

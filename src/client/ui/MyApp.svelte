@@ -136,7 +136,7 @@
 			<h3 class="text-xl font-bold mb-3">Peers</h3>
 
 			{#each updatePeriodically(chatClient.webRTCManager.peers) as [peerId, peer]}
-				{@const connectionPair = peer.sctp?.transport.iceTransport.getSelectedCandidatePair()}
+				{@const connectionPair = peer.sctp?.transport.iceTransport.getSelectedCandidatePair?.()}
 				<div class="relative p-3">
 					<div class="absolute top-3 left-3 w-10 h-10">
 						<Avatar userId={peerId} />
