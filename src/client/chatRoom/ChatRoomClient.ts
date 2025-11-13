@@ -78,16 +78,9 @@ async function createWebRTChatRoom(roomId: string) {
 	
 	const manager = new WebRTCManager(signalServer, myId, { iceServers });
 
-	manager.onConnectionStateChange.addListener(({ id, pc }) => {
-		const logMessage = `Connection state for peer ${id} changed to ${pc.connectionState}:`;
-		const connectionType = pc.sctp?.transport.iceTransport.getSelectedCandidatePair();
-		if (!connectionType) {
-			console.log(logMessage);
-		} else {
-			console.groupCollapsed(logMessage);
-			console.log(`  Local:`, connectionType.local);
-			console.log(`  Remote:`, connectionType.remote);
-			console.groupEnd();
+	manager.onConnectionStateChange.addListener(({ pc }) => {
+		if (pc.iceConnectionState === "failed") {
+			pc.restartIce();
 		}
 	});
 
@@ -97,14 +90,20 @@ async function createWebRTChatRoom(roomId: string) {
 
 	manager.onCreatePeer.addListener(({id, pc}) => {
 		pc.ondatachannel = event => {
-			const dataChannel = WebRTCDataChannel.fromEvent<ChatRoom.OutboundPacket>({ event });
+			const dataChannel = new WebRTCDataChannel<ChatRoom.OutboundPacket>({
+				dataChannel: event.channel,
+				dispose: true,
+			});
 			mergedChannel.addChild(id, dataChannel);
 		};
-	});
 
-	manager.onJoinPeer.addListener(({id, pc}) => {
-		const dataChannel = WebRTCDataChannel.fromPeer<ChatRoom.OutboundPacket>({ pc, label: "data" });
-		mergedChannel.addChild(id, dataChannel);
+		if (myId < id) {
+			const dataChannel = new WebRTCDataChannel<ChatRoom.OutboundPacket>({
+				dataChannel: pc.createDataChannel("chat"),
+				dispose: true,
+			});
+			mergedChannel.addChild(id, dataChannel);
+		}
 	});
 
 	manager.onRemovePeer.addListener(({ id }) => {
@@ -131,8 +130,10 @@ async function createWebRTChatRoom(roomId: string) {
 		}
 	}) satisfies ChatRoomClient;
 
-	manager.onJoinPeer.addListener(({ id }) => {
-		transformer.onMessage.emit({ type: "join", user: id });
+	signalServer.onMessage.addListener((message) => {
+		if (message.type === "join") {
+			transformer.onMessage.emit({ type: "join", user: message.user });
+		}
 	});
 
 	manager.onRemovePeer.addListener(({ id }) => {

@@ -55,6 +55,7 @@ export function webRTCPerfectNegotiation(
 				}
 			}
 			if ("candidate" in message) {
+				// if (message.candidate.candidate?.includes("host")) return; // Test stun/turn
 				try {
 					await pc.addIceCandidate(message.candidate);
 				} catch (err) {

@@ -7,25 +7,11 @@ export class WebRTCDataChannel<T> implements DataChannel<unknown, T> {
 
 	constructor(readonly options: {
 		readonly dataChannel: RTCDataChannel,
-		readonly disposeDataChannel: boolean,
+		readonly dispose: boolean,
 	}) {
 		this.options.dataChannel.onmessage = (event) => {
 			this.onMessage.emit(JSON.parse(event.data));
 		}
-	}
- 
-	static fromPeer<T>({ pc, label}: { pc: RTCPeerConnection, label: string }) {
-		return new WebRTCDataChannel<T>({
-			dataChannel: pc.createDataChannel(label),
-			disposeDataChannel: true,
-		});
-	}
-
-	static fromEvent<T>({ event }: { event: RTCDataChannelEvent }) {
-		return new WebRTCDataChannel<T>({
-			dataChannel: event.channel,
-			disposeDataChannel: true,
-		});
 	}
 
 	get readyState() {
@@ -42,7 +28,7 @@ export class WebRTCDataChannel<T> implements DataChannel<unknown, T> {
 	}
 
 	[Symbol.dispose]() {
-		if (this.options.disposeDataChannel) {
+		if (this.options.dispose) {
 			this.options.dataChannel.close();
 		}
 	}

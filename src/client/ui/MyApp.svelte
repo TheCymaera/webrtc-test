@@ -5,6 +5,7 @@
 	import { ChatRoomClient } from "../chatRoom/ChatRoomClient.js";
 	import Avatar from "./Avatar.svelte";
 	import Markdown from "./Markdown.svelte";
+	import { onDestroy } from "svelte";
 
 	let messages: Array<ChatRoom.InboundPacket> = $state([]);
 
@@ -40,7 +41,7 @@
 	}
 
 	let chatClient = $state<Awaited<ReturnType<typeof createClientFromURL>> | undefined>(undefined);
-	window.addEventListener('beforeunload', () => chatClient?.dataChannel[Symbol.dispose]());
+	onDestroy(() => chatClient?.dataChannel[Symbol.dispose]());
 
 	async function loadClientFromURL() {
 		chatClient?.dataChannel[Symbol.dispose]();
@@ -66,6 +67,7 @@
 		return value;
 	};
 </script>
+<svelte:window onbeforeunload={() => chatClient?.dataChannel[Symbol.dispose]()} />
 <div class="fixed inset-0 flex h-full items-stretch">
 	<div class="flex-1">
 		{#if parseURL().implementation === null}
@@ -134,6 +136,7 @@
 			<h3 class="text-xl font-bold mb-3">Peers</h3>
 
 			{#each updatePeriodically(chatClient.webRTCManager.peers) as [peerId, peer]}
+				{@const connectionPair = peer.sctp?.transport.iceTransport.getSelectedCandidatePair()}
 				<div class="relative p-3">
 					<div class="absolute top-3 left-3 w-10 h-10">
 						<Avatar userId={peerId} />
@@ -147,6 +150,12 @@
 						<div class="whitespace-pre-wrap">
 							{peer.connectionState}
 						</div>
+
+						{#if connectionPair}
+							<div class="text-sm opacity-80">
+								{connectionPair.local.type}
+							</div>
+						{/if}
 					</div>
 				</div>
 				

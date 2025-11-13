@@ -8,7 +8,6 @@ import type { RelayClient } from "../shared/relay/RelayClient.js";
 export class WebRTCManager {
 	readonly peers = new Map<string, RTCPeerConnection>();
 	readonly onCreatePeer = new EventEmitter<{ id: string, pc: RTCPeerConnection }>();
-	readonly onJoinPeer = new EventEmitter<{ id: string, pc: RTCPeerConnection }>();
 	readonly onRemovePeer = new EventEmitter<{ id: string }>();
 	readonly onConnectionStateChange = new EventEmitter<{ id: string, pc: RTCPeerConnection }>();
 	readonly #signalChannels = new Map<string, DataChannel<RTCNegotiationMessage, RTCNegotiationMessage>>();
@@ -46,65 +45,66 @@ export class WebRTCManager {
 		webRTCConfiguration: RTCConfiguration = {}
 	) {
 		this.#listener = this.signalServer.onMessage.addListener((signalMessage) => {
+			const peerId = signalMessage.user;
+
 			// ignore own messages
-			if (signalMessage.user === myId) return;
+			if (peerId === myId) return;
 
 			// process leave messages
 			if (signalMessage.type === "leave") {
-				this.removePeer(signalMessage.user);
+				this.removePeer(peerId);
 				return;
 			}
 
-			const peerId = signalMessage.user;
-			
-			// register a peer
-			if (!this.peers.has(peerId)) {
-				// set up signaling channel
-				const signalingChannel = new TransformerDataChannel({
-					original: signalServer,
-					disposeOriginal: false,
-					async *inbound(messages) {
-						// include the current signal message
-						const allMessages = concatAsync([signalMessage], messages);
-						for await (const message of allMessages) {
-							if (message.user === myId) continue;
-							if (message.user !== peerId) continue;
-							if (message.type !== "message") continue;
 
-							if (!RTCNegotiationMessage.isInstance(message.content)) continue;
-							yield message.content;
-						}
-					},
-					async *outbound(messages) {
-						for await (const message of messages) {
-							yield { type: "message", recipients: [peerId], content: message } satisfies Relay.ServerBoundPacket;
-						}
-					}
-				}) satisfies DataChannel<RTCNegotiationMessage, RTCNegotiationMessage>;
-
-				// create peer connection
-				const pc = new RTCPeerConnection(webRTCConfiguration);
-				this.peers.set(peerId, pc);
-				this.#signalChannels.set(peerId, signalingChannel);
-
-				// connect using perfect negotiation
-				const isPolite = peerId.localeCompare(myId) > 0;
-				webRTCPerfectNegotiation(signalingChannel, pc, isPolite);
-
-				// restart ICE on failure
-				pc.oniceconnectionstatechange = () => {
-					if (pc.iceConnectionState === "failed") pc.restartIce();
-					this.onConnectionStateChange.emit({ id: peerId, pc });
-				}
-
-				// emit create event
-				this.onCreatePeer.emit({ id: peerId, pc });
-			}
-
+			// negotiations happen lazily, ping the other peer so they know about us immediately
 			if (signalMessage.type === "join") {
-				// emit join event
-				this.onJoinPeer.emit({ id: peerId, pc: this.peers.get(peerId)! });
+				signalServer.send({ type: "message", content: "ping", recipients: [peerId] });
 			}
+
+			
+			// peer already exists
+			if (this.peers.has(peerId)) return;
+
+			// set up signaling channel
+			const signalingChannel = new TransformerDataChannel({
+				original: signalServer,
+				disposeOriginal: false,
+				async *inbound(messages) {
+					// include the current signal message
+					const allMessages = concatAsync([signalMessage], messages);
+					for await (const message of allMessages) {
+						if (message.user === myId) continue;
+						if (message.user !== peerId) continue;
+						if (message.type !== "message") continue;
+
+						if (!RTCNegotiationMessage.isInstance(message.content)) continue;
+						yield message.content;
+					}
+				},
+				async *outbound(messages) {
+					for await (const message of messages) {
+						yield { type: "message", recipients: [peerId], content: message } satisfies Relay.ServerBoundPacket;
+					}
+				}
+			}) satisfies DataChannel<RTCNegotiationMessage, RTCNegotiationMessage>;
+
+			// create peer connection
+			const pc = new RTCPeerConnection(webRTCConfiguration);
+			this.peers.set(peerId, pc);
+			this.#signalChannels.set(peerId, signalingChannel);
+
+			// connect using perfect negotiation
+			const isPolite = peerId.localeCompare(myId) > 0;
+			webRTCPerfectNegotiation(signalingChannel, pc, isPolite);
+
+			// emit connection state changes
+			pc.oniceconnectionstatechange = () => {
+				this.onConnectionStateChange.emit({ id: peerId, pc });
+			}
+
+			// emit create event
+			this.onCreatePeer.emit({ id: peerId, pc });
 		});
 	}
 }
